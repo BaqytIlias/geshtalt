@@ -20,7 +20,7 @@ welcome_screen_ui <- function() {
         ),
         shiny::div(
           class = "hero-highlights",
-          mini_badge("30 тапсырма"),
+          mini_badge("32 тапсырма"),
           mini_badge("Кездейсоқ рет"),
           mini_badge("Жауап уақыты тіркеледі"),
           mini_badge("Нәтижелер CSV форматына сақталады")
@@ -143,10 +143,6 @@ multi_panel_task_ui <- function(task, position, total, participant_id) {
     soft_card(
       class = "multi-task-card",
       shiny::tags$h2(task$question_text),
-      shiny::tags$p(
-        class = "results-note",
-        "Әр панельге жеке жауап беріп, растаңыз. Төрт панель толық аяқталғаннан кейін келесі тапсырма ашылады."
-      ),
       shiny::div(
         class = "multi-slider-grid",
         shiny::div(

@@ -334,17 +334,20 @@ body {
 
 .multi-panel-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
 }
 
 .multi-panel-title {
+  flex: 1 1 auto;
   font-weight: 700;
   color: #16324F;
+  line-height: 1.35;
 }
 
 .multi-panel-status {
+  flex-shrink: 0;
   font-size: 12px;
   font-weight: 700;
   padding: 6px 10px;

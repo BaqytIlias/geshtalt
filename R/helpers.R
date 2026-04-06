@@ -336,6 +336,232 @@ replace_results_file <- function(temp_file, file_path, attempts = 4, delay_sec =
   stop("The result file could not be updated after multiple write attempts.", call. = FALSE)
 }
 
+excel_column_name <- function(index) {
+  index <- as.integer(index)
+  if (is.na(index) || index < 1) {
+    stop("Excel column index must be a positive integer.", call. = FALSE)
+  }
+
+  name <- character()
+  while (index > 0) {
+    rem <- (index - 1) %% 26
+    name <- c(intToUtf8(65 + rem), name)
+    index <- (index - 1) %/% 26
+  }
+  paste(name, collapse = "")
+}
+
+xml_escape <- function(x) {
+  x <- enc2utf8(as.character(x))
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x <- gsub("\"", "&quot;", x, fixed = TRUE)
+  x <- gsub("'", "&apos;", x, fixed = TRUE)
+  x
+}
+
+sanitize_sheet_name <- function(x, existing = character()) {
+  base <- trimws(enc2utf8(as.character(x %||% "Парақ")))
+  if (!nzchar(base)) {
+    base <- "Парақ"
+  }
+
+  base <- gsub("[\\\\/:*?\\[\\]]", "_", base)
+  base <- substr(base, 1, 31)
+  candidate <- base
+  counter <- 1L
+
+  while (candidate %in% existing) {
+    suffix <- paste0("_", counter)
+    candidate <- paste0(substr(base, 1, max(1, 31 - nchar(suffix))), suffix)
+    counter <- counter + 1L
+  }
+
+  candidate
+}
+
+build_xlsx_cell_xml <- function(value, row_index, col_index) {
+  cell_ref <- paste0(excel_column_name(col_index), row_index)
+
+  if (length(value) == 0 || is.na(value)) {
+    return(sprintf('<c r="%s"/>', cell_ref))
+  }
+
+  if (inherits(value, "POSIXt")) {
+    value <- format(value, "%Y-%m-%d %H:%M:%S")
+  }
+
+  if (is.numeric(value) && is.finite(value)) {
+    return(sprintf('<c r="%s"><v>%s</v></c>', cell_ref, format(value, scientific = FALSE, trim = TRUE)))
+  }
+
+  text_value <- xml_escape(value)
+  sprintf('<c r="%s" t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>', cell_ref, text_value)
+}
+
+build_xlsx_sheet_xml <- function(data) {
+  data <- as.data.frame(data, stringsAsFactors = FALSE, check.names = FALSE)
+  headers <- names(data)
+
+  rows_xml <- character()
+  header_cells <- vapply(seq_along(headers), function(i) {
+    build_xlsx_cell_xml(headers[[i]], 1L, i)
+  }, character(1))
+  rows_xml[[1]] <- sprintf('<row r="1">%s</row>', paste(header_cells, collapse = ""))
+
+  if (nrow(data) > 0) {
+    for (row_index in seq_len(nrow(data))) {
+      values <- data[row_index, , drop = TRUE]
+      row_cells <- vapply(seq_along(values), function(col_index) {
+        build_xlsx_cell_xml(values[[col_index]], row_index + 1L, col_index)
+      }, character(1))
+      rows_xml[[length(rows_xml) + 1L]] <- sprintf('<row r="%s">%s</row>', row_index + 1L, paste(row_cells, collapse = ""))
+    }
+  }
+
+  paste0(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    '<sheetData>',
+    paste(rows_xml, collapse = ""),
+    '</sheetData>',
+    '</worksheet>'
+  )
+}
+
+build_xlsx_workbook_xml <- function(sheet_names) {
+  sheet_nodes <- vapply(seq_along(sheet_names), function(i) {
+    sprintf(
+      '<sheet name="%s" sheetId="%s" r:id="rId%s"/>',
+      xml_escape(sheet_names[[i]]),
+      i,
+      i
+    )
+  }, character(1))
+
+  paste0(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ',
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+    '<sheets>',
+    paste(sheet_nodes, collapse = ""),
+    '</sheets>',
+    '</workbook>'
+  )
+}
+
+build_xlsx_workbook_rels_xml <- function(sheet_names) {
+  rel_nodes <- vapply(seq_along(sheet_names), function(i) {
+    sprintf(
+      '<Relationship Id="rId%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet%s.xml"/>',
+      i,
+      i
+    )
+  }, character(1))
+
+  paste0(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    paste(rel_nodes, collapse = ""),
+    '</Relationships>'
+  )
+}
+
+build_xlsx_content_types_xml <- function(sheet_count) {
+  sheet_overrides <- vapply(seq_len(sheet_count), function(i) {
+    sprintf(
+      '<Override PartName="/xl/worksheets/sheet%s.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+      i
+    )
+  }, character(1))
+
+  paste0(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '<Default Extension="xml" ContentType="application/xml"/>',
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+    paste(sheet_overrides, collapse = ""),
+    '</Types>'
+  )
+}
+
+build_xlsx_root_rels_xml <- function() {
+  paste0(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>',
+    '</Relationships>'
+  )
+}
+
+compress_directory_to_zip <- function(source_dir, destination_zip) {
+  source_dir <- normalizePath(source_dir, winslash = "\\", mustWork = TRUE)
+  destination_zip <- normalizePath(destination_zip, winslash = "\\", mustWork = FALSE)
+
+  ps_quote <- function(x) {
+    paste0("'", gsub("'", "''", x, fixed = TRUE), "'")
+  }
+
+  command <- paste(
+    "$ErrorActionPreference='Stop';",
+    "Add-Type -AssemblyName System.IO.Compression.FileSystem;",
+    sprintf("if (Test-Path %s) { Remove-Item %s -Force }", ps_quote(destination_zip), ps_quote(destination_zip)),
+    sprintf("[System.IO.Compression.ZipFile]::CreateFromDirectory(%s, %s)", ps_quote(source_dir), ps_quote(destination_zip))
+  )
+
+  result <- suppressWarnings(
+    system2("powershell", c("-NoProfile", "-Command", command), stdout = TRUE, stderr = TRUE)
+  )
+
+  if (!file.exists(destination_zip)) {
+    stop(
+      paste(c("The Excel archive could not be created.", result), collapse = "\n"),
+      call. = FALSE
+    )
+  }
+
+  invisible(TRUE)
+}
+
+write_simple_xlsx <- function(sheets, path) {
+  if (!length(sheets)) {
+    stop("At least one worksheet is required for Excel export.", call. = FALSE)
+  }
+
+  root_dir <- tempfile(pattern = "xlsx_export_")
+  dir.create(root_dir, recursive = TRUE, showWarnings = FALSE)
+  on.exit(unlink(root_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+  dir.create(file.path(root_dir, "_rels"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(file.path(root_dir, "xl", "_rels"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(file.path(root_dir, "xl", "worksheets"), recursive = TRUE, showWarnings = FALSE)
+
+  sheet_names <- character()
+  sheet_values <- vector("list", length(sheets))
+
+  for (i in seq_along(sheets)) {
+    sheet_name <- names(sheets)[i] %||% paste0("Парақ ", i)
+    sheet_name <- sanitize_sheet_name(sheet_name, existing = sheet_names)
+    sheet_names[[i]] <- sheet_name
+    sheet_values[[i]] <- as.data.frame(sheets[[i]], stringsAsFactors = FALSE, check.names = FALSE)
+  }
+
+  writeLines(build_xlsx_content_types_xml(length(sheet_names)), file.path(root_dir, "[Content_Types].xml"), useBytes = TRUE)
+  writeLines(build_xlsx_root_rels_xml(), file.path(root_dir, "_rels", ".rels"), useBytes = TRUE)
+  writeLines(build_xlsx_workbook_xml(sheet_names), file.path(root_dir, "xl", "workbook.xml"), useBytes = TRUE)
+  writeLines(build_xlsx_workbook_rels_xml(sheet_names), file.path(root_dir, "xl", "_rels", "workbook.xml.rels"), useBytes = TRUE)
+
+  for (i in seq_along(sheet_values)) {
+    sheet_xml <- build_xlsx_sheet_xml(sheet_values[[i]])
+    writeLines(sheet_xml, file.path(root_dir, "xl", "worksheets", paste0("sheet", i, ".xml")), useBytes = TRUE)
+  }
+
+  compress_directory_to_zip(root_dir, path)
+  invisible(TRUE)
+}
+
 append_results_csv <- function(row_df, file_path, lock_dir, timeout_sec = 10, poll_sec = 0.05) {
   dir.create(dirname(file_path), recursive = TRUE, showWarnings = FALSE)
   row_df <- normalize_results_table(row_df)

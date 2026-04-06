@@ -884,13 +884,13 @@ server <- function(input, output, session) {
 
   output$download_buttons_ui <- shiny::renderUI({
     buttons <- list(
-      shiny::downloadButton("download_my_results", "Менің нәтижелерімді жүктеу", class = "action-main")
+      shiny::downloadButton("download_my_results", "Менің нәтижелерімді Excel-ге жүктеу", class = "action-main")
     )
 
     if (file.exists(RESULTS_FILE)) {
       buttons <- c(
         buttons,
-        list(shiny::downloadButton("download_all_results", "Барлық нәтижелерді жүктеу", class = "action-secondary"))
+        list(shiny::downloadButton("download_all_results", "Барлық нәтижелерді Excel-ге жүктеу", class = "action-secondary"))
       )
     }
 
@@ -968,19 +968,19 @@ server <- function(input, output, session) {
 
   output$download_my_results <- shiny::downloadHandler(
     filename = function() {
-      paste0("participant_results_", trimws(input$participant_id %||% "participant"), "_", Sys.Date(), ".csv")
+      paste0("participant_results_", trimws(input$participant_id %||% "participant"), "_", Sys.Date(), ".xlsx")
     },
     content = function(file) {
-      readr::write_excel_csv(normalize_results_table(state$session_results), file)
+      write_simple_xlsx(list("Менің нәтижелерім" = normalize_results_table(state$session_results)), file)
     }
   )
 
   output$download_all_results <- shiny::downloadHandler(
     filename = function() {
-      paste0("experiment_results_", Sys.Date(), ".csv")
+      paste0("experiment_results_", Sys.Date(), ".xlsx")
     },
     content = function(file) {
-      readr::write_excel_csv(read_results_file(RESULTS_FILE), file)
+      write_simple_xlsx(list("Барлық нәтижелер" = read_results_file(RESULTS_FILE)), file)
     }
   )
 
