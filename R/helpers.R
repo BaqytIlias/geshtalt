@@ -909,3 +909,913 @@ plot_line_generic <- function(data, compact = FALSE, x_breaks = NULL, x_labels =
 
   p
 }
+
+# ---- Teacher analysis helpers ----
+strip_empty_to_na <- function(x) {
+  x <- trimws(as.character(x %||% NA))
+  x[!nzchar(x)] <- NA_character_
+  x
+}
+
+safe_numeric_coerce <- function(x) {
+  if (is.numeric(x)) {
+    return(as.numeric(x))
+  }
+
+  x_chr <- strip_empty_to_na(x)
+  if (all(is.na(x_chr))) {
+    return(rep(NA_real_, length(x_chr)))
+  }
+
+  x_chr <- gsub("%", "", x_chr, fixed = TRUE)
+  x_chr <- gsub(",", ".", x_chr, fixed = TRUE)
+  x_chr <- gsub("[^0-9\\.-]", "", x_chr)
+  x_chr[!nzchar(x_chr)] <- NA_character_
+  suppressWarnings(as.numeric(x_chr))
+}
+
+safe_logical_coerce <- function(x) {
+  if (is.logical(x)) {
+    return(as.logical(x))
+  }
+
+  x_chr <- tolower(strip_empty_to_na(x))
+  out <- rep(NA, length(x_chr))
+  out[x_chr %in% c("true", "t", "1", "yes", "y", "иә")] <- TRUE
+  out[x_chr %in% c("false", "f", "0", "no", "n", "жоқ")] <- FALSE
+  out
+}
+
+nonempty_unique_values <- function(x) {
+  x <- strip_empty_to_na(x)
+  sort(unique(x[!is.na(x)]))
+}
+
+analysis_metric_choices <- function() {
+  c(
+    "Субъективті жауап" = "subjective_answer",
+    "Реакция уақыты" = "reaction_time",
+    "Сенім" = "confidence",
+    "Жеңілдік бағасы" = "ease_rating",
+    "Дәлдік" = "accuracy"
+  )
+}
+
+analysis_column_specs <- function() {
+  list(
+    participant_id = list(
+      label = "Қатысушы идентификаторы",
+      aliases = c("participant_id"),
+      required = FALSE
+    ),
+    task_identifier = list(
+      label = "Тапсырма идентификаторы",
+      aliases = c("question_id", "task_id"),
+      required = FALSE
+    ),
+    block_info = list(
+      label = "Блок немесе task family",
+      aliases = c("block", "task_family"),
+      required = FALSE
+    ),
+    vis_type = list(
+      label = "Визуализация түрі",
+      aliases = c("vis_type", "visualization_type"),
+      required = TRUE
+    ),
+    answer = list(
+      label = "Жауап",
+      aliases = c("answer", "selected_answer", "panel_selected_answer"),
+      required = FALSE
+    ),
+    is_correct = list(
+      label = "Дұрыс/бұрыс белгісі",
+      aliases = c("is_correct", "panel_is_correct"),
+      required = FALSE
+    ),
+    reaction_time_sec = list(
+      label = "Реакция уақыты",
+      aliases = c("reaction_time_sec", "time_sec", "panel_reaction_time_sec"),
+      required = FALSE
+    ),
+    confidence = list(
+      label = "Сенім",
+      aliases = c("confidence"),
+      required = FALSE
+    ),
+    ease_rating = list(
+      label = "Жеңілдік бағасы",
+      aliases = c("ease_rating"),
+      required = FALSE
+    )
+  )
+}
+
+find_matching_column <- function(col_names, aliases) {
+  if (!length(col_names)) {
+    return(NA_character_)
+  }
+  lower_names <- tolower(col_names)
+  lower_aliases <- tolower(aliases)
+  match_idx <- match(lower_aliases, lower_names)
+  match_idx <- match_idx[!is.na(match_idx)]
+  if (!length(match_idx)) {
+    return(NA_character_)
+  }
+  col_names[[match_idx[[1]]]]
+}
+
+build_analysis_column_map <- function(df) {
+  specs <- analysis_column_specs()
+  col_names <- names(df)
+  out <- lapply(specs, function(spec) find_matching_column(col_names, spec$aliases))
+  out
+}
+
+validate_analysis_columns <- function(df) {
+  if (is.null(df)) {
+    return(list(
+      summary = data.frame(),
+      warnings = character(),
+      vis_type_ready = FALSE
+    ))
+  }
+
+  specs <- analysis_column_specs()
+  col_map <- build_analysis_column_map(df)
+
+  summary_rows <- lapply(names(specs), function(key) {
+    spec <- specs[[key]]
+    found_col <- col_map[[key]] %||% NA_character_
+    found_flag <- !is.na(found_col)
+    data.frame(
+      `Күтілетін өріс` = spec$label,
+      `Қажетті` = ifelse(isTRUE(spec$required), "Иә", "Жоқ"),
+      `Табылған баған` = ifelse(found_flag, found_col, "Табылмады"),
+      `Күйі` = ifelse(found_flag, "Табылды", "Табылмады"),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  vis_type_col <- col_map$vis_type
+  vis_type_values <- if (!is.na(vis_type_col)) strip_empty_to_na(df[[vis_type_col]]) else rep(NA_character_, nrow(df))
+  vis_type_ready <- !all(is.na(vis_type_values))
+
+  warnings <- character()
+  if (is.na(vis_type_col)) {
+    warnings <- c(warnings, "CSV файлында vis_type немесе visualization_type бағаны табылмады.")
+  } else if (!vis_type_ready) {
+    warnings <- c(warnings, "Визуализация түрі бағаны табылды, бірақ оның мәндері бос.")
+  }
+
+  list(
+    summary = dplyr::bind_rows(summary_rows),
+    warnings = warnings,
+    vis_type_ready = vis_type_ready,
+    column_map = col_map
+  )
+}
+
+safe_read_experiment_csv <- function(file_info) {
+  if (is.null(file_info) || is.null(file_info$datapath) || !file.exists(file_info$datapath)) {
+    return(list(data = NULL, error = "CSV файлы таңдалмаған."))
+  }
+
+  parsed <- tryCatch(
+    readr::read_csv(
+      file_info$datapath,
+      show_col_types = FALSE,
+      guess_max = 5000,
+      progress = FALSE,
+      locale = readr::locale(encoding = "UTF-8")
+    ),
+    error = function(e) e
+  )
+
+  if (inherits(parsed, "error")) {
+    fallback <- tryCatch(
+      utils::read.csv(file_info$datapath, stringsAsFactors = FALSE, fileEncoding = "UTF-8"),
+      error = function(e) e
+    )
+
+    if (inherits(fallback, "error")) {
+      return(list(
+        data = NULL,
+        error = paste("CSV файлын оқу мүмкін болмады.", parsed$message)
+      ))
+    }
+
+    parsed <- fallback
+  }
+
+  parsed <- as.data.frame(parsed, stringsAsFactors = FALSE)
+  if (!nrow(parsed)) {
+    return(list(data = parsed, error = "Жүктелген CSV файлы бос."))
+  }
+
+  list(data = parsed, error = NULL)
+}
+
+pick_mapped_column <- function(df, col_name, default = NA) {
+  n <- nrow(df)
+  if (is.na(col_name) || !col_name %in% names(df)) {
+    return(rep(default, n))
+  }
+  df[[col_name]]
+}
+
+normalize_analysis_dataset <- function(df) {
+  if (is.null(df) || nrow(df) == 0) {
+    return(data.frame())
+  }
+
+  col_map <- build_analysis_column_map(df)
+  n <- nrow(df)
+
+  participant_id <- strip_empty_to_na(pick_mapped_column(df, col_map$participant_id, NA_character_))
+  question_id <- strip_empty_to_na(pick_mapped_column(df, find_matching_column(names(df), c("question_id")), NA_character_))
+  task_id <- strip_empty_to_na(pick_mapped_column(df, find_matching_column(names(df), c("task_id")), NA_character_))
+  task_family <- strip_empty_to_na(pick_mapped_column(df, find_matching_column(names(df), c("task_family")), NA_character_))
+  block <- strip_empty_to_na(pick_mapped_column(df, find_matching_column(names(df), c("block")), NA_character_))
+  vis_type <- strip_empty_to_na(pick_mapped_column(df, col_map$vis_type, NA_character_))
+  answer <- strip_empty_to_na(pick_mapped_column(df, col_map$answer, NA_character_))
+  is_correct <- safe_logical_coerce(pick_mapped_column(df, col_map$is_correct, NA))
+  reaction_time_sec <- safe_numeric_coerce(pick_mapped_column(df, col_map$reaction_time_sec, NA))
+  confidence <- safe_numeric_coerce(pick_mapped_column(df, col_map$confidence, NA))
+  ease_rating <- safe_numeric_coerce(pick_mapped_column(df, col_map$ease_rating, NA))
+
+  gestalt_principle <- strip_empty_to_na(pick_mapped_column(df, find_matching_column(names(df), c("gestalt_principle")), NA_character_))
+
+  derived_block <- block
+  if (all(is.na(derived_block))) {
+    derived_block <- ifelse(
+      !is.na(task_family) & tolower(task_family) == "analytics",
+      "Analytics",
+      ifelse(!is.na(task_family) | !is.na(gestalt_principle), "Gestalt", NA_character_)
+    )
+  }
+
+  derived_task_family <- task_family
+  if (all(is.na(derived_task_family)) && any(!is.na(derived_block))) {
+    derived_task_family <- derived_block
+  }
+  if (all(is.na(derived_task_family)) && any(!is.na(gestalt_principle))) {
+    derived_task_family <- gestalt_principle
+  }
+
+  out <- data.frame(
+    participant_id = participant_id,
+    question_id = question_id,
+    task_id = task_id,
+    block = derived_block,
+    task_family = derived_task_family,
+    vis_type = vis_type,
+    answer = answer,
+    is_correct = is_correct,
+    reaction_time_sec = reaction_time_sec,
+    confidence = confidence,
+    ease_rating = ease_rating,
+    stringsAsFactors = FALSE
+  )
+
+  out$row_kind <- ifelse(is.na(out$is_correct), "subjective", "objective")
+  out$answer_num <- safe_numeric_coerce(out$answer)
+  out$accuracy_num <- ifelse(is.na(out$is_correct), NA_real_, ifelse(out$is_correct, 1, 0))
+  out$source_row <- seq_len(n)
+  out
+}
+
+mean_or_na <- function(x, digits = 2) {
+  x <- suppressWarnings(as.numeric(x))
+  x <- x[is.finite(x)]
+  if (!length(x)) {
+    return(NA_real_)
+  }
+  round(mean(x), digits)
+}
+
+median_or_na <- function(x, digits = 2) {
+  x <- suppressWarnings(as.numeric(x))
+  x <- x[is.finite(x)]
+  if (!length(x)) {
+    return(NA_real_)
+  }
+  round(stats::median(x), digits)
+}
+
+generate_analysis_descriptives <- function(data) {
+  if (is.null(data) || nrow(data) == 0) {
+    return(list(
+      overview = list(participants = 0L, rows = 0L, vis_types = 0L, objective_rows = 0L, subjective_rows = 0L),
+      table = data.frame()
+    ))
+  }
+
+  summary_df <- data %>%
+    dplyr::group_by(vis_type) %>%
+    dplyr::summarise(
+      `Қатысушы саны` = dplyr::n_distinct(participant_id[!is.na(participant_id)]),
+      `Жол саны` = dplyr::n(),
+      `Орташа реакция уақыты (сек)` = mean_or_na(reaction_time_sec),
+      `Медиана реакция уақыты (сек)` = median_or_na(reaction_time_sec),
+      `Орташа сенім` = mean_or_na(confidence),
+      `Орташа жеңілдік` = mean_or_na(ease_rating),
+      `Дәлдік (%)` = {
+        x <- accuracy_num[!is.na(accuracy_num)]
+        if (!length(x)) NA_real_ else round(mean(x) * 100, 2)
+      },
+      .groups = "drop"
+    ) %>%
+    dplyr::arrange(vis_type)
+
+  list(
+    overview = list(
+      participants = dplyr::n_distinct(data$participant_id[!is.na(data$participant_id)]),
+      rows = nrow(data),
+      vis_types = dplyr::n_distinct(data$vis_type[!is.na(data$vis_type)]),
+      objective_rows = sum(data$row_kind == "objective", na.rm = TRUE),
+      subjective_rows = sum(data$row_kind == "subjective", na.rm = TRUE)
+    ),
+    table = summary_df
+  )
+}
+
+filter_analysis_dataset <- function(data, vis_types = NULL, task_families = NULL, blocks = NULL, row_scope = "all") {
+  if (is.null(data) || nrow(data) == 0) {
+    return(data.frame())
+  }
+
+  filtered <- data
+
+  if (!is.null(vis_types) && length(vis_types) > 0) {
+    filtered <- filtered[filtered$vis_type %in% vis_types, , drop = FALSE]
+  }
+
+  if (!is.null(task_families) && length(task_families) > 0) {
+    filtered <- filtered[filtered$task_family %in% task_families, , drop = FALSE]
+  }
+
+  if (!is.null(blocks) && length(blocks) > 0) {
+    filtered <- filtered[filtered$block %in% blocks, , drop = FALSE]
+  }
+
+  if (identical(row_scope, "objective")) {
+    filtered <- filtered[filtered$row_kind == "objective", , drop = FALSE]
+  } else if (identical(row_scope, "subjective")) {
+    filtered <- filtered[filtered$row_kind == "subjective", , drop = FALSE]
+  }
+
+  filtered
+}
+
+prepare_analysis_metric_data <- function(data, metric) {
+  metric_label <- switch(
+    metric,
+    subjective_answer = "субъективті жауап",
+    reaction_time = "реакция уақыты",
+    confidence = "сенім",
+    ease_rating = "жеңілдік бағасы",
+    accuracy = "дәлдік",
+    "көрсеткіш"
+  )
+
+  if (is.null(data) || nrow(data) == 0) {
+    return(list(
+      data = data.frame(),
+      metric_label = metric_label,
+      error = "Талдауға арналған дерек табылмады."
+    ))
+  }
+
+  prepared <- data
+
+  if (identical(metric, "subjective_answer")) {
+    prepared <- prepared[prepared$row_kind == "subjective", , drop = FALSE]
+    prepared$analysis_value <- prepared$answer_num
+    if (!nrow(prepared)) {
+      return(list(
+        data = data.frame(),
+        metric_label = metric_label,
+        error = "Сүзгіден кейін субъективті жауап жолдары қалмады."
+      ))
+    }
+    if (!any(is.finite(prepared$analysis_value))) {
+      return(list(
+        data = data.frame(),
+        metric_label = metric_label,
+        error = "Субъективті жауап бағанын сандық форматқа түрлендіру мүмкін болмады."
+      ))
+    }
+  } else if (identical(metric, "reaction_time")) {
+    prepared$analysis_value <- prepared$reaction_time_sec
+  } else if (identical(metric, "confidence")) {
+    prepared$analysis_value <- prepared$confidence
+  } else if (identical(metric, "ease_rating")) {
+    prepared$analysis_value <- prepared$ease_rating
+  } else if (identical(metric, "accuracy")) {
+    prepared <- prepared[prepared$row_kind == "objective", , drop = FALSE]
+    prepared$analysis_value <- prepared$accuracy_num
+  } else {
+    prepared$analysis_value <- NA_real_
+  }
+
+  prepared$analysis_value <- safe_numeric_coerce(prepared$analysis_value)
+  prepared <- prepared[!is.na(prepared$vis_type) & is.finite(prepared$analysis_value), , drop = FALSE]
+
+  if (!nrow(prepared)) {
+    return(list(
+      data = data.frame(),
+      metric_label = metric_label,
+      error = "Таңдалған көрсеткіш үшін жеткілікті сандық дерек табылмады."
+    ))
+  }
+
+  list(
+    data = prepared,
+    metric_label = metric_label,
+    error = NULL
+  )
+}
+
+format_p_value <- function(p_value) {
+  if (is.null(p_value) || length(p_value) != 1 || is.na(p_value)) {
+    return("анықталмады")
+  }
+  if (p_value < 0.001) {
+    return("< 0.001")
+  }
+  sprintf("%.4f", p_value)
+}
+
+run_shapiro_safe <- function(data, metric_label) {
+  if (is.null(data) || nrow(data) == 0) {
+    return(list(
+      table = data.frame(),
+      interpretation = "Нормалдықты тексеруге дерек жеткіліксіз."
+    ))
+  }
+
+  if (identical(metric_label, "дәлдік")) {
+    return(list(
+      table = data.frame(
+        `Визуализация түрі` = "Барлығы",
+        N = nrow(data),
+        `Shapiro p` = NA_character_,
+        Қорытынды = "Бинарлық көрсеткіш үшін бұл тексеріс ұсынылмайды.",
+        stringsAsFactors = FALSE
+      ),
+      interpretation = "Дәлдік бинарлық сипатта болғандықтан, Shapiro-Wilk тестін қолдану орынды емес."
+    ))
+  }
+
+  split_data <- split(data$analysis_value, data$vis_type)
+  rows <- lapply(names(split_data), function(group_name) {
+    values <- split_data[[group_name]]
+    values <- values[is.finite(values)]
+
+    if (length(values) < 3) {
+      return(data.frame(
+        `Визуализация түрі` = group_name,
+        N = length(values),
+        `Shapiro p` = NA_character_,
+        Қорытынды = "Үлгі тым аз.",
+        stringsAsFactors = FALSE
+      ))
+    }
+
+    if (length(values) > 5000) {
+      return(data.frame(
+        `Визуализация түрі` = group_name,
+        N = length(values),
+        `Shapiro p` = NA_character_,
+        Қорытынды = "Үлгі тым үлкен, Shapiro-Wilk қолданылмады.",
+        stringsAsFactors = FALSE
+      ))
+    }
+
+    test_result <- tryCatch(
+      stats::shapiro.test(values),
+      error = function(e) e
+    )
+
+    if (inherits(test_result, "error")) {
+      return(data.frame(
+        `Визуализация түрі` = group_name,
+        N = length(values),
+        `Shapiro p` = NA_character_,
+        Қорытынды = "Тексеру орындалмады.",
+        stringsAsFactors = FALSE
+      ))
+    }
+
+    data.frame(
+      `Визуализация түрі` = group_name,
+      N = length(values),
+      `Shapiro p` = format_p_value(test_result$p.value),
+      Қорытынды = ifelse(
+        test_result$p.value < 0.05,
+        "Қалыптылықтан ауытқу бар.",
+        "Қалыптылықтан айқын ауытқу байқалмады."
+      ),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  table_df <- dplyr::bind_rows(rows)
+  significant_flags <- grepl("ауытқу бар", table_df$Қорытынды %||% "")
+  valid_rows <- !is.na(table_df$`Shapiro p`)
+
+  interpretation <- if (!any(valid_rows)) {
+    "Нормалдықты тексеру үшін жеткілікті топтар табылмады."
+  } else if (any(significant_flags, na.rm = TRUE)) {
+    "Кемінде бір топта қалыптылық шартынан ауытқу бар, сондықтан параметрлік емес талдауды да қарастырған жөн."
+  } else {
+    "Қалыптылықтан айқын ауытқу байқалмады, сондықтан параметрлік нәтижелерді қарастыруға болады."
+  }
+
+  list(table = table_df, interpretation = interpretation)
+}
+
+group_metric_summary <- function(data) {
+  data %>%
+    dplyr::group_by(vis_type) %>%
+    dplyr::summarise(
+      N = dplyr::n(),
+      Орташа = mean_or_na(analysis_value),
+      Медиана = median_or_na(analysis_value),
+      .groups = "drop"
+    ) %>%
+    dplyr::arrange(vis_type)
+}
+
+run_t_test_analysis <- function(data, metric_label) {
+  if (dplyr::n_distinct(data$vis_type) != 2) {
+    return(list(
+      status = "warning",
+      raw_output = "t-test жүргізу үшін дәл екі визуализация түрі таңдалуы керек.",
+      interpretation = "Екі топ таңдалмағандықтан, t-test орындалмады.",
+      group_summary = group_metric_summary(data),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    ))
+  }
+
+  group_counts <- table(data$vis_type)
+  if (any(group_counts < 2)) {
+    return(list(
+      status = "warning",
+      raw_output = "Кемінде бір топта бақылаулар саны жеткіліксіз.",
+      interpretation = "t-test жүргізу үшін әр топта кемінде екі сандық мән болуы қажет.",
+      group_summary = group_metric_summary(data),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    ))
+  }
+
+  test_result <- tryCatch(
+    stats::t.test(analysis_value ~ vis_type, data = data),
+    error = function(e) e
+  )
+
+  if (inherits(test_result, "error")) {
+    return(list(
+      status = "error",
+      raw_output = test_result$message,
+      interpretation = "t-test орындалмады.",
+      group_summary = group_metric_summary(data),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    ))
+  }
+
+  result_table <- data.frame(
+    Тест = "t-test",
+    Көрсеткіш = metric_label,
+    `p-мәні` = format_p_value(test_result$p.value),
+    `t-статистика` = round(unname(test_result$statistic), 4),
+    `Еркіндік дәрежесі` = round(unname(test_result$parameter), 4),
+    stringsAsFactors = FALSE
+  )
+
+  interpretation <- if (is.finite(test_result$p.value) && test_result$p.value < 0.05) {
+    paste0("p < 0.05 болғандықтан, таңдалған визуализация түрлері арасында ", metric_label, " бойынша статистикалық мәнді айырмашылық бар.")
+  } else {
+    paste0("p > 0.05 болғандықтан, таңдалған визуализация түрлері арасында ", metric_label, " бойынша мәнді айырмашылық анықталмады.")
+  }
+
+  list(
+    status = "success",
+    raw_output = capture.output(print(test_result)),
+    interpretation = interpretation,
+    group_summary = group_metric_summary(data),
+    result_table = result_table,
+    posthoc_table = data.frame()
+  )
+}
+
+run_anova_analysis <- function(data, metric_label) {
+  group_counts <- table(data$vis_type)
+  if (length(group_counts) < 3) {
+    return(list(
+      status = "warning",
+      raw_output = "ANOVA жүргізу үшін кемінде үш визуализация түрі қажет.",
+      interpretation = "ANOVA орындалмады.",
+      group_summary = group_metric_summary(data),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    ))
+  }
+
+  if (any(group_counts < 2)) {
+    return(list(
+      status = "warning",
+      raw_output = "Кемінде бір топта бақылау саны жеткіліксіз.",
+      interpretation = "ANOVA жүргізу үшін әр топта кемінде екі сандық мән болуы қажет.",
+      group_summary = group_metric_summary(data),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    ))
+  }
+
+  model <- tryCatch(
+    stats::aov(analysis_value ~ vis_type, data = data),
+    error = function(e) e
+  )
+
+  if (inherits(model, "error")) {
+    return(list(
+      status = "error",
+      raw_output = model$message,
+      interpretation = "ANOVA орындалмады.",
+      group_summary = group_metric_summary(data),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    ))
+  }
+
+  anova_summary <- summary(model)[[1]]
+  anova_table <- data.frame(
+    Термин = rownames(anova_summary),
+    anova_summary,
+    row.names = NULL,
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+  p_value <- suppressWarnings(as.numeric(anova_summary[1, "Pr(>F)"]))
+
+  posthoc_table <- data.frame()
+  posthoc_note <- NULL
+  raw_output <- capture.output(print(summary(model)))
+
+  if (is.finite(p_value) && p_value < 0.05) {
+    tukey_result <- tryCatch(
+      stats::TukeyHSD(model),
+      error = function(e) e
+    )
+
+    if (!inherits(tukey_result, "error")) {
+      tukey_df <- data.frame(
+        Салыстыру = rownames(tukey_result$vis_type),
+        tukey_result$vis_type,
+        row.names = NULL,
+        check.names = FALSE,
+        stringsAsFactors = FALSE
+      )
+      posthoc_table <- tukey_df
+      raw_output <- c(raw_output, "", "TukeyHSD:", capture.output(print(tukey_result)))
+
+      significant_pairs <- tukey_df$Салыстыру[suppressWarnings(as.numeric(tukey_df$`p adj`)) < 0.05]
+      if (length(significant_pairs)) {
+        posthoc_note <- paste0(
+          "Tukey post-hoc нәтижесі бойынша ",
+          paste(significant_pairs, collapse = ", "),
+          " жұптары арасында айырмашылық бар."
+        )
+      } else {
+        posthoc_note <- "Tukey post-hoc нәтижесі бойынша нақты жұптық айырмашылық анықталмады."
+      }
+    }
+  }
+
+  interpretation <- if (is.finite(p_value) && p_value < 0.05) {
+    paste0("ANOVA нәтижесі бойынша визуализация түрі ", metric_label, " көрсеткішіне әсер етеді.")
+  } else {
+    paste0("ANOVA нәтижесі бойынша визуализация түрлері арасында ", metric_label, " көрсеткіші бойынша мәнді айырмашылық анықталмады.")
+  }
+
+  if (!is.null(posthoc_note)) {
+    interpretation <- c(interpretation, posthoc_note)
+  }
+
+  list(
+    status = "success",
+    raw_output = raw_output,
+    interpretation = interpretation,
+    group_summary = group_metric_summary(data),
+    result_table = anova_table,
+    posthoc_table = posthoc_table
+  )
+}
+
+run_kruskal_analysis <- function(data, metric_label) {
+  if (dplyr::n_distinct(data$vis_type) < 2) {
+    return(list(
+      status = "warning",
+      raw_output = "Kruskal-Wallis тесті үшін кемінде екі визуализация түрі қажет.",
+      interpretation = "Параметрлік емес тест орындалмады.",
+      group_summary = group_metric_summary(data),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    ))
+  }
+
+  test_result <- tryCatch(
+    stats::kruskal.test(analysis_value ~ vis_type, data = data),
+    error = function(e) e
+  )
+
+  if (inherits(test_result, "error")) {
+    return(list(
+      status = "error",
+      raw_output = test_result$message,
+      interpretation = "Kruskal-Wallis тесті орындалмады.",
+      group_summary = group_metric_summary(data),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    ))
+  }
+
+  result_table <- data.frame(
+    Тест = "Kruskal-Wallis",
+    Көрсеткіш = metric_label,
+    `p-мәні` = format_p_value(test_result$p.value),
+    `Хи-квадрат` = round(unname(test_result$statistic), 4),
+    `Еркіндік дәрежесі` = round(unname(test_result$parameter), 4),
+    stringsAsFactors = FALSE
+  )
+
+  interpretation <- if (is.finite(test_result$p.value) && test_result$p.value < 0.05) {
+    paste0("p < 0.05 болғандықтан, таңдалған визуализация түрлері арасында ", metric_label, " бойынша статистикалық мәнді айырмашылық бар.")
+  } else {
+    paste0("p > 0.05 болғандықтан, таңдалған визуализациялар арасында ", metric_label, " бойынша мәнді айырмашылық анықталмады.")
+  }
+
+  list(
+    status = "success",
+    raw_output = capture.output(print(test_result)),
+    interpretation = interpretation,
+    group_summary = group_metric_summary(data),
+    result_table = result_table,
+    posthoc_table = data.frame()
+  )
+}
+
+run_analysis_test <- function(data, metric_label, robust = FALSE) {
+  if (is.null(data) || nrow(data) == 0) {
+    return(list(
+      status = "warning",
+      raw_output = "Статистикалық тест жүргізуге дерек жеткіліксіз.",
+      interpretation = "Тест жүргізілмеді.",
+      group_summary = data.frame(),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    ))
+  }
+
+  vis_type_count <- dplyr::n_distinct(data$vis_type)
+  if (vis_type_count < 2) {
+    return(list(
+      status = "warning",
+      raw_output = "Кемінде екі визуализация түрін таңдаңыз.",
+      interpretation = "Салыстыру үшін визуализация түрлері жеткіліксіз.",
+      group_summary = group_metric_summary(data),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    ))
+  }
+
+  if (isTRUE(robust)) {
+    return(run_kruskal_analysis(data, metric_label))
+  }
+
+  if (vis_type_count == 2) {
+    run_t_test_analysis(data, metric_label)
+  } else {
+    run_anova_analysis(data, metric_label)
+  }
+}
+
+as_export_section <- function(df, section_name) {
+  if (is.null(df) || !nrow(df)) {
+    return(data.frame())
+  }
+  out <- as.data.frame(df, stringsAsFactors = FALSE)
+  out$section <- section_name
+  out
+}
+
+build_analysis_test_export <- function(test_result, normality_result = NULL) {
+  pieces <- list(
+    as_export_section(test_result$group_summary %||% data.frame(), "group_summary"),
+    as_export_section(test_result$result_table %||% data.frame(), "test_result"),
+    as_export_section(test_result$posthoc_table %||% data.frame(), "posthoc"),
+    as_export_section(normality_result$table %||% data.frame(), "normality")
+  )
+
+  pieces <- pieces[vapply(pieces, nrow, integer(1)) > 0]
+  if (!length(pieces)) {
+    return(data.frame(
+      section = "message",
+      note = "Экспортқа қолайлы статистикалық нәтиже әзірге жоқ.",
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  dplyr::bind_rows(pieces)
+}
+
+analysis_empty_plot <- function(message_text) {
+  ggplot2::ggplot() +
+    ggplot2::annotate("text", x = 0.5, y = 0.5, label = message_text, color = COLORS["slate"], size = 5) +
+    ggplot2::xlim(0, 1) +
+    ggplot2::ylim(0, 1) +
+    ggplot2::theme_void()
+}
+
+plot_subjective_score_boxplot <- function(data) {
+  subjective_data <- data[data$row_kind == "subjective" & is.finite(data$answer_num) & !is.na(data$vis_type), , drop = FALSE]
+  if (!nrow(subjective_data)) {
+    return(analysis_empty_plot("Субъективті жауап дерегі табылмады."))
+  }
+
+  ggplot2::ggplot(subjective_data, ggplot2::aes(x = vis_type, y = answer_num, fill = vis_type)) +
+    ggplot2::geom_boxplot(alpha = 0.9, outlier.alpha = 0.55) +
+    ggplot2::scale_fill_manual(values = rep(COLORS[c("blue", "sage", "gold", "coral", "plum")], length.out = dplyr::n_distinct(subjective_data$vis_type))) +
+    ggplot2::labs(x = NULL, y = "Субъективті баға") +
+    experiment_theme() +
+    ggplot2::theme(
+      legend.position = "none",
+      axis.text.x = ggplot2::element_text(angle = 18, hjust = 1)
+    )
+}
+
+plot_confidence_mean_bar <- function(data) {
+  summary_df <- data %>%
+    dplyr::filter(!is.na(vis_type), is.finite(confidence)) %>%
+    dplyr::group_by(vis_type) %>%
+    dplyr::summarise(mean_confidence = mean(confidence), .groups = "drop")
+
+  if (!nrow(summary_df)) {
+    return(analysis_empty_plot("Сенім көрсеткіші табылмады."))
+  }
+
+  plot_bar_generic(
+    data.frame(
+      category = summary_df$vis_type,
+      value = summary_df$mean_confidence,
+      fill = rep(unname(COLORS["blue"]), nrow(summary_df)),
+      stringsAsFactors = FALSE
+    ),
+    show_value_labels = TRUE,
+    y_label = "Орташа сенім"
+  )
+}
+
+plot_accuracy_bar <- function(data) {
+  summary_df <- data %>%
+    dplyr::filter(!is.na(vis_type), !is.na(accuracy_num)) %>%
+    dplyr::group_by(vis_type) %>%
+    dplyr::summarise(accuracy_pct = mean(accuracy_num) * 100, .groups = "drop")
+
+  if (!nrow(summary_df)) {
+    return(analysis_empty_plot("Дәлдікке қатысты объективті дерек табылмады."))
+  }
+
+  plot_bar_generic(
+    data.frame(
+      category = summary_df$vis_type,
+      value = summary_df$accuracy_pct,
+      fill = rep(unname(COLORS["sage"]), nrow(summary_df)),
+      stringsAsFactors = FALSE
+    ),
+    show_value_labels = TRUE,
+    y_label = "Дәлдік (%)"
+  )
+}
+
+plot_reaction_time_boxplot <- function(data) {
+  rt_data <- data[data$reaction_time_sec > 0 & is.finite(data$reaction_time_sec) & !is.na(data$vis_type), , drop = FALSE]
+  if (!nrow(rt_data)) {
+    return(analysis_empty_plot("Реакция уақыты дерегі табылмады."))
+  }
+
+  ggplot2::ggplot(rt_data, ggplot2::aes(x = vis_type, y = reaction_time_sec, fill = vis_type)) +
+    ggplot2::geom_boxplot(alpha = 0.9, outlier.alpha = 0.55) +
+    ggplot2::scale_fill_manual(values = rep(COLORS[c("coral", "gold", "blue", "sage", "plum")], length.out = dplyr::n_distinct(rt_data$vis_type))) +
+    ggplot2::labs(x = NULL, y = "Реакция уақыты (сек)") +
+    experiment_theme() +
+    ggplot2::theme(
+      legend.position = "none",
+      axis.text.x = ggplot2::element_text(angle = 18, hjust = 1)
+    )
+}

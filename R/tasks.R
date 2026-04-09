@@ -1,18 +1,18 @@
 make_task <- function(
-  task_id,
-  task_family,
-  principle = NA_character_,
-  visualization_type,
-  question_type,
-  question_text,
-  answer_choices = NULL,
-  correct_answer = NA_character_,
-  renderer = "single_plot",
-  chart_count = 1L,
-  plot_fun = NULL,
-  plot_funs = NULL,
-  panel_labels = NULL,
-  panels = NULL
+    task_id,
+    task_family,
+    principle = NA_character_,
+    visualization_type,
+    question_type,
+    question_text,
+    answer_choices = NULL,
+    correct_answer = NA_character_,
+    renderer = "single_plot",
+    chart_count = 1L,
+    plot_fun = NULL,
+    plot_funs = NULL,
+    panel_labels = NULL,
+    panels = NULL
 ) {
   list(
     task_id = task_id,
@@ -36,45 +36,45 @@ make_task <- function(
 validate_task_bank <- function(task_bank) {
   issues <- character()
   regular_analytic_types <- c("Bar chart", "Treemap", "Heatmap", "Bubble chart")
-
+  
   if (length(task_bank) != 32) {
     issues <- c(issues, sprintf("Expected 32 total tasks, found %s.", length(task_bank)))
   }
-
+  
   task_ids <- vapply(task_bank, function(task) task$task_id, character(1))
   question_ids <- vapply(task_bank, function(task) task$question_id, character(1))
-
+  
   if (anyDuplicated(task_ids)) {
     issues <- c(issues, "Task IDs must be unique.")
   }
   if (anyDuplicated(question_ids)) {
     issues <- c(issues, "Question IDs must be unique.")
   }
-
+  
   special_tasks <- Filter(function(task) identical(task$renderer, "multi_panel_individual"), task_bank)
   regular_tasks <- Filter(function(task) !identical(task$renderer, "multi_panel_individual"), task_bank)
-
+  
   if (length(regular_tasks) != 30) {
     issues <- c(issues, sprintf("Expected 30 regular tasks, found %s.", length(regular_tasks)))
   }
   if (length(special_tasks) != 2) {
     issues <- c(issues, sprintf("Expected 2 special multi-panel tasks, found %s.", length(special_tasks)))
   }
-
+  
   regular_families <- vapply(regular_tasks, function(task) task$task_family, character(1))
   regular_principles <- vapply(regular_tasks, function(task) task$principle %||% NA_character_, character(1))
   regular_visuals <- vapply(regular_tasks, function(task) task$visualization_type, character(1))
-
+  
   regular_gestalt_n <- sum(regular_principles %in% GESTALT_PRINCIPLES)
   regular_analytic_n <- sum(regular_families == ANALYTIC_FAMILY)
-
+  
   if (regular_gestalt_n != 10) {
     issues <- c(issues, sprintf("Expected 10 regular gestalt tasks, found %s.", regular_gestalt_n))
   }
   if (regular_analytic_n != 20) {
     issues <- c(issues, sprintf("Expected 20 regular analytic tasks, found %s.", regular_analytic_n))
   }
-
+  
   gestalt_counts <- table(factor(regular_principles[regular_principles %in% GESTALT_PRINCIPLES], levels = GESTALT_PRINCIPLES))
   if (any(gestalt_counts != 2)) {
     issues <- c(
@@ -85,7 +85,7 @@ validate_task_bank <- function(task_bank) {
       )
     )
   }
-
+  
   analytic_visuals <- regular_visuals[regular_families == ANALYTIC_FAMILY]
   if (!all(analytic_visuals %in% regular_analytic_types)) {
     invalid_visuals <- unique(analytic_visuals[!analytic_visuals %in% regular_analytic_types])
@@ -94,7 +94,7 @@ validate_task_bank <- function(task_bank) {
       paste("Regular analytic tasks must use only Bar chart, Treemap, Heatmap, or Bubble chart:", paste(invalid_visuals, collapse = ", "))
     )
   }
-
+  
   analytic_counts <- table(factor(analytic_visuals, levels = regular_analytic_types))
   if (any(analytic_counts != 5)) {
     issues <- c(
@@ -105,12 +105,12 @@ validate_task_bank <- function(task_bank) {
       )
     )
   }
-
+  
   special_ids <- sort(vapply(special_tasks, function(task) task$task_id, character(1)))
   if (!identical(special_ids, c("SPA_01", "SPG_01"))) {
     issues <- c(issues, paste("Special task IDs must be SPA_01 and SPG_01. Found:", paste(special_ids, collapse = ", ")))
   }
-
+  
   for (task in task_bank) {
     if (!task$renderer %in% VALID_RENDERERS) {
       issues <- c(issues, paste("Unsupported renderer:", task$task_id))
@@ -118,7 +118,7 @@ validate_task_bank <- function(task_bank) {
     if (!nzchar(task$question_text)) {
       issues <- c(issues, paste("Missing question text:", task$task_id))
     }
-
+    
     if (identical(task$renderer, "single_plot")) {
       if (length(task$answer_choices) < 2) {
         issues <- c(issues, paste("Task needs at least two answer choices:", task$task_id))
@@ -130,7 +130,7 @@ validate_task_bank <- function(task_bank) {
         issues <- c(issues, paste("single_plot task missing plot_fun:", task$task_id))
       }
     }
-
+    
     if (identical(task$renderer, "multi_panel_individual")) {
       if (is.null(task$panels) || length(task$panels) != 4) {
         issues <- c(issues, paste("multi_panel_individual task must have exactly 4 panels:", task$task_id))
@@ -154,11 +154,11 @@ validate_task_bank <- function(task_bank) {
       }
     }
   }
-
+  
   if (length(issues) > 0) {
     stop(paste(c("Task bank validation failed:", issues), collapse = "\n"), call. = FALSE)
   }
-
+  
   invisible(TRUE)
 }
 
@@ -186,7 +186,7 @@ plot_reference_closure <- function(show_titles = TRUE) {
     fill = c("#9ecae1", "#a1d99b", "#fdae6b"),
     stringsAsFactors = FALSE
   )
-
+  
   p <- ggplot2::ggplot() +
     ggplot2::geom_rect(
       data = rects,
@@ -212,7 +212,7 @@ plot_reference_closure <- function(show_titles = TRUE) {
     ggplot2::xlim(0, 8) +
     ggplot2::ylim(0.5, 4.2) +
     ggplot2::theme_void(base_size = 14)
-
+  
   strip_titles(p)
 }
 
@@ -227,7 +227,7 @@ plot_reference_similarity <- function(show_titles = TRUE) {
     ),
     stringsAsFactors = FALSE
   )
-
+  
   p <- ggplot2::ggplot(df, ggplot2::aes(x, y, color = grp)) +
     ggplot2::geom_point(size = 7) +
     ggplot2::scale_color_manual(values = c("Синяя" = "#3182bd", "Оранжевая" = "#fd8d3c", "Зелёная" = "#31a354")) +
@@ -237,13 +237,13 @@ plot_reference_similarity <- function(show_titles = TRUE) {
       panel.grid.minor = ggplot2::element_blank()
     ) +
     ggplot2::labs(x = NULL, y = NULL)
-
+  
   strip_titles(p)
 }
 
 plot_reference_proximity <- function(show_titles = TRUE) {
   set.seed(123)
-
+  
   cluster1 <- data.frame(
     x = rnorm(12, mean = 1.0, sd = 0.12),
     y = rnorm(12, mean = 1.0, sd = 0.12)
@@ -256,15 +256,15 @@ plot_reference_proximity <- function(show_titles = TRUE) {
     x = rnorm(12, mean = 5.3, sd = 0.12),
     y = rnorm(12, mean = 1.0, sd = 0.12)
   )
-
+  
   df <- dplyr::bind_rows(cluster1, cluster2, cluster3)
-
+  
   p <- ggplot2::ggplot(df, ggplot2::aes(x, y)) +
     ggplot2::geom_point(size = 4, color = "steelblue") +
     ggplot2::coord_equal() +
     ggplot2::theme_minimal(base_size = 14) +
     ggplot2::labs(x = NULL, y = NULL)
-
+  
   strip_titles(p)
 }
 
@@ -274,14 +274,14 @@ plot_reference_symmetry <- function(show_titles = TRUE) {
     y = c(3, 2, 1, 1.5, 2.5, 3.2, 3.2, 2.5, 1.5, 1, 2, 3),
     stringsAsFactors = FALSE
   )
-
+  
   p <- ggplot2::ggplot(df, ggplot2::aes(x, y)) +
     ggplot2::geom_point(size = 6, color = "steelblue") +
     ggplot2::geom_vline(xintercept = 0, linetype = "dashed", color = "gray40", linewidth = 1) +
     ggplot2::coord_equal() +
     ggplot2::theme_minimal(base_size = 14) +
     ggplot2::labs(x = NULL, y = NULL)
-
+  
   strip_titles(p)
 }
 
@@ -291,13 +291,13 @@ plot_reference_continuity <- function(show_titles = TRUE) {
     y = c(1, 1.5, 2.0, 2.6, 3.1, 3.6, 4.1, 4.6),
     stringsAsFactors = FALSE
   )
-
+  
   line_b <- data.frame(
     x = c(1.2, 2.2, 3.1, 4.0, 5.0, 5.9),
     y = c(4.2, 3.7, 3.1, 2.6, 2.1, 1.6),
     stringsAsFactors = FALSE
   )
-
+  
   p <- ggplot2::ggplot() +
     ggplot2::geom_path(data = line_a, ggplot2::aes(x, y), color = "orange", linewidth = 1.5) +
     ggplot2::geom_point(data = line_a, ggplot2::aes(x, y), size = 5, color = "steelblue") +
@@ -306,7 +306,7 @@ plot_reference_continuity <- function(show_titles = TRUE) {
     ggplot2::annotate("text", x = 1.15, y = 4.45, label = "B", color = "gray35", fontface = "bold", size = 5) +
     ggplot2::theme_minimal(base_size = 14) +
     ggplot2::labs(x = NULL, y = NULL)
-
+  
   strip_titles(p)
 }
 
@@ -317,7 +317,7 @@ plot_reference_bar <- function(df = ANALYTIC_STIM_DATA, show_titles = TRUE) {
     ggplot2::ylim(0, max(df$Value) * 1.15) +
     ggplot2::theme_minimal(base_size = 14) +
     ggplot2::labs(x = "Санат", y = "Мән")
-
+  
   strip_titles(p)
 }
 
@@ -334,7 +334,7 @@ plot_reference_treemap <- function(df = ANALYTIC_STIM_DATA, show_titles = TRUE) 
   rect_df$label <- paste(rect_df$Category, rect_df$Value, sep = "\n")
   rect_df$fill <- c("#08306b", "#2171b5", "#4292c6", "#6baed6", "#9ecae1")
   rect_df$text_color <- c("#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#1f2937")
-
+  
   p <- ggplot2::ggplot(rect_df) +
     ggplot2::geom_rect(
       ggplot2::aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = fill),
@@ -356,14 +356,14 @@ plot_reference_treemap <- function(df = ANALYTIC_STIM_DATA, show_titles = TRUE) 
     ggplot2::scale_color_identity() +
     ggplot2::coord_equal(expand = FALSE) +
     ggplot2::theme_void(base_size = 14)
-
+  
   strip_titles(p)
 }
 
 plot_reference_heatmap <- function(df = ANALYTIC_STIM_DATA, show_titles = TRUE) {
   df2 <- df
   df2$Row <- "Values"
-
+  
   p <- ggplot2::ggplot(df2, ggplot2::aes(x = Category, y = Row, fill = Value)) +
     ggplot2::geom_tile(color = "white", linewidth = 1) +
     ggplot2::geom_text(ggplot2::aes(label = Value), size = 5) +
@@ -375,13 +375,13 @@ plot_reference_heatmap <- function(df = ANALYTIC_STIM_DATA, show_titles = TRUE) 
       axis.ticks.y = ggplot2::element_blank()
     ) +
     ggplot2::labs(x = "Санат")
-
+  
   strip_titles(p)
 }
 
 plot_reference_bubble <- function(df = ANALYTIC_STIM_DATA, show_titles = TRUE) {
   bubble_breaks <- sort(unique(df$Value))
-
+  
   p <- ggplot2::ggplot(df, ggplot2::aes(x = Category, y = 1, size = Value)) +
     ggplot2::geom_point(alpha = 0.7, color = "tomato") +
     ggplot2::geom_text(ggplot2::aes(label = Value), nudge_y = -0.42, vjust = 1, size = 4.5) +
@@ -402,17 +402,17 @@ plot_reference_bubble <- function(df = ANALYTIC_STIM_DATA, show_titles = TRUE) {
       legend.title = ggplot2::element_blank()
     ) +
     ggplot2::labs(x = "Санат")
-
+  
   strip_titles(p)
 }
 
 build_task_bank <- function() {
   tasks <- list()
-
+  
   add_task <- function(task) {
     tasks[[length(tasks) + 1]] <<- task
   }
-
+  
   single_task <- function(
     task_id,
     task_family,
@@ -438,7 +438,7 @@ build_task_bank <- function() {
       plot_fun = plot_fun
     )
   }
-
+  
   multi_panel_task <- function(
     task_id,
     task_family,
@@ -462,96 +462,96 @@ build_task_bank <- function() {
       panels = panels
     )
   }
-
+  
   # ---- Regular Gestalt: 10 (exactly based on reference code, without likert-only screens) ----
   add_task(single_task(
     "CLO_01", "Closure", "Closure", "Gestalt plot", "Region count",
-    "Неше логикалық аймақ көрінеді?",
+    "Қанша логикалық аймақ анықталады?",
     c("1", "2", "3", "4"),
     "3",
     function() plot_reference_closure(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "CLO_02", "Closure", "Closure", "Gestalt plot", "Most complete area",
-    "Қай аймақ ең толық көрінеді?",
+    "Қай аймақ ең толық болып қабылданады?",
     c("A", "B", "C"),
     "B",
     function() plot_reference_closure(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "SIM_01", "Similarity", "Similarity", "Gestalt plot", "Group count",
-    "Неше топ көрінеді?",
+    "Қанша топ байқалады?",
     c("1", "2", "3", "4"),
     "3",
     function() plot_reference_similarity(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "SIM_02", "Similarity", "Similarity", "Gestalt plot", "Grouping criterion",
-    "Нысандар қай белгі бойынша топтасады?",
+    "Нысандар қай белгі бойынша топтасқан?",
     c("Түсі бойынша", "Өлшемі бойынша", "Қашықтығы бойынша", "Пішіні бойынша"),
     "Түсі бойынша",
     function() plot_reference_similarity(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "PROX_01", "Proximity", "Proximity", "Gestalt plot", "Cluster count",
-    "Неше шоғыр көрінеді?",
+    "Қанша топ анықталады?",
     c("1", "2", "3", "4"),
     "3",
     function() plot_reference_proximity(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "PROX_02", "Proximity", "Proximity", "Gestalt plot", "Central group",
-    "Қай топ ортасына ең жақын?",
+    "Қай топ орталыққа ең жақын орналасқан?",
     c("Сол жақ", "Орталық", "Оң жақ"),
     "Орталық",
     function() plot_reference_proximity(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "SYM_01", "Symmetry", "Symmetry", "Gestalt plot", "More ordered structure",
-    "Қай құрылым реттірек көрінеді?",
+    "Қай құрылым неғұрлым реттелген болып көрінеді?",
     c("Симметриялы", "Симметриясыз", "Бірдей"),
     "Симметриялы",
     function() plot_reference_symmetry(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "SYM_02", "Symmetry", "Symmetry", "Gestalt plot", "Mirrored parts",
-    "Қай бөлік екіншісін айнадай қайталайды?",
+    "Қай бөлік екіншісін симметриялы түрде қайталайды?",
     c("Сол және оң", "Жоғарғы және төменгі", "Тек ортасы"),
     "Сол және оң",
     function() plot_reference_symmetry(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "CONT_01", "Continuity", "Continuity", "Gestalt plot", "Unified line",
-    "Қай нүктелер тізбегі бір сызық болып қабылданады?",
+    "Қай нүктелер тізбегі үздіксіз сызық ретінде қабылданады?",
     c("A сызығы", "B сызығы", "Екеуі де", "Ешқайсысы"),
     "A сызығы",
     function() plot_reference_continuity(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "CONT_02", "Continuity", "Continuity", "Gestalt plot", "Main line count",
-    "Неше негізгі сызық көрінеді?",
+    "Қанша негізгі сызық анықталады?",
     c("1", "2", "3"),
     "1",
     function() plot_reference_continuity(show_titles = TRUE)
   ))
-
+  
   # ---- Special Gestalt Multi-panel: extra 1 ----
   add_task(multi_panel_task(
     "SPG_01", "Gestalt Special", "Mixed", "4-panel gestalt reference", "Mixed gestalt comparison",
-    "Әр сурет үшін дұрыс жауапты таңдаңыз.",
+    "Төмендегі төрт суреттің әрқайсысы үшін қай жауап дұрыс?",
     panels = list(
       list(
         panel_id = "spg_closure",
-        panel_label = "Неше логикалық аймақ көрінеді?",
+        panel_label = "Қанша логикалық аймақ анықталады?",
         panel_order = 1L,
         answer_choices = c("1", "2", "3", "4"),
         correct_answer = "3",
@@ -559,7 +559,7 @@ build_task_bank <- function() {
       ),
       list(
         panel_id = "spg_similarity",
-        panel_label = "Нысандар қай белгі бойынша топтасады?",
+        panel_label = "Нысандар қай белгі бойынша топтасқан?",
         panel_order = 2L,
         answer_choices = c("Түсі бойынша", "Өлшемі бойынша", "Қашықтығы бойынша", "Пішіні бойынша"),
         correct_answer = "Түсі бойынша",
@@ -567,7 +567,7 @@ build_task_bank <- function() {
       ),
       list(
         panel_id = "spg_proximity",
-        panel_label = "Қай топ ортасына ең жақын?",
+        panel_label = "Қай топ орталыққа ең жақын орналасқан?",
         panel_order = 3L,
         answer_choices = c("Сол жақ", "Орталық", "Оң жақ"),
         correct_answer = "Орталық",
@@ -575,7 +575,7 @@ build_task_bank <- function() {
       ),
       list(
         panel_id = "spg_continuity",
-        panel_label = "Қай нүктелер тізбегі бір сызық болып қабылданады?",
+        panel_label = "Қай нүктелер тізбегі үздіксіз сызық ретінде қабылданады?",
         panel_order = 4L,
         answer_choices = c("A сызығы", "B сызығы", "Екеуі де", "Ешқайсысы"),
         correct_answer = "A сызығы",
@@ -583,176 +583,176 @@ build_task_bank <- function() {
       )
     )
   ))
-
+  
   # ---- Regular Analytics: 20 (4 families x 5 questions exactly like reference) ----
   add_task(single_task(
     "BAR_01", ANALYTIC_FAMILY, NA_character_, "Bar chart", "Maximum",
-    "Ең үлкен мәні бар санатты табыңыз.",
+    "Қай санаттың мәні ең жоғары?",
     c("A", "B", "C", "D", "E"),
     "D",
     function() plot_reference_bar(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "BAR_02", ANALYTIC_FAMILY, NA_character_, "Bar chart", "Minimum",
-    "Ең кіші мәні бар санатты табыңыз.",
+    "Қай санаттың мәні ең төмен?",
     c("A", "B", "C", "D", "E"),
     "E",
     function() plot_reference_bar(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "BAR_03", ANALYTIC_FAMILY, NA_character_, "Bar chart", "Compare",
-    "B мен C арасында қай санаттың мәні жоғары?",
+    "Қай санаттың мәні жоғары: B әлде C?",
     c("B", "C", "Бірдей"),
     "B",
     function() plot_reference_bar(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "BAR_04", ANALYTIC_FAMILY, NA_character_, "Bar chart", "Second highest",
-    "Мәні бойынша екінші санат қайсы?",
+    "Қай санаттың мәні максималды мәннен кейін екінші орында тұр?",
     c("A", "B", "C", "D", "E"),
     "B",
     function() plot_reference_bar(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "BAR_05", ANALYTIC_FAMILY, NA_character_, "Bar chart", "Difference",
-    "D санаты B санатынан неше бірлікке жоғары?",
+    "D санатының мәні B санатынан қанша бірлікке жоғары?",
     c("10", "15", "20", "25", "30"),
     "20",
     function() plot_reference_bar(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "TREE_01", ANALYTIC_FAMILY, NA_character_, "Treemap", "Maximum",
-    "Ең үлкен мәні бар санатты табыңыз.",
+    "Қай санаттың мәні ең жоғары?",
     c("A", "B", "C", "D", "E"),
     "D",
     function() plot_reference_treemap(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "TREE_02", ANALYTIC_FAMILY, NA_character_, "Treemap", "Minimum",
-    "Ең кіші мәні бар санатты табыңыз.",
+    "Қай санаттың мәні ең төмен?",
     c("A", "B", "C", "D", "E"),
     "E",
     function() plot_reference_treemap(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "TREE_03", ANALYTIC_FAMILY, NA_character_, "Treemap", "Compare",
-    "B мен C арасында қай санаттың мәні жоғары?",
+    "Қай санаттың мәні жоғары: B әлде C?",
     c("B", "C", "Бірдей"),
     "B",
     function() plot_reference_treemap(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "TREE_04", ANALYTIC_FAMILY, NA_character_, "Treemap", "Second highest",
-    "Мәні бойынша екінші санат қайсы?",
+    "Қай санаттың мәні максималды мәннен кейін екінші орында тұр?",
     c("A", "B", "C", "D", "E"),
     "B",
     function() plot_reference_treemap(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "TREE_05", ANALYTIC_FAMILY, NA_character_, "Treemap", "Difference",
-    "D санаты B санатынан неше бірлікке жоғары?",
+    "D санатының мәні B санатынан қанша бірлікке жоғары?",
     c("10", "15", "20", "25", "30"),
     "20",
     function() plot_reference_treemap(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "HEAT_01", ANALYTIC_FAMILY, NA_character_, "Heatmap", "Maximum",
-    "Ең үлкен мәні бар санатты табыңыз.",
+    "Қай санаттың мәні ең жоғары?",
     c("A", "B", "C", "D", "E"),
     "D",
     function() plot_reference_heatmap(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "HEAT_02", ANALYTIC_FAMILY, NA_character_, "Heatmap", "Minimum",
-    "Ең кіші мәні бар санатты табыңыз.",
+    "Қай санаттың мәні ең төмен?",
     c("A", "B", "C", "D", "E"),
     "E",
     function() plot_reference_heatmap(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "HEAT_03", ANALYTIC_FAMILY, NA_character_, "Heatmap", "Compare",
-    "B мен C арасында қай санаттың мәні жоғары?",
+    "Қай санаттың мәні жоғары: B әлде C?",
     c("B", "C", "Бірдей"),
     "B",
     function() plot_reference_heatmap(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "HEAT_04", ANALYTIC_FAMILY, NA_character_, "Heatmap", "Second highest",
-    "Мәні бойынша екінші санат қайсы?",
+    "Қай санаттың мәні максималды мәннен кейін екінші орында тұр?",
     c("A", "B", "C", "D", "E"),
     "B",
     function() plot_reference_heatmap(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "HEAT_05", ANALYTIC_FAMILY, NA_character_, "Heatmap", "Difference",
-    "D санаты B санатынан неше бірлікке жоғары?",
+    "D санатының мәні B санатынан қанша бірлікке жоғары?",
     c("10", "15", "20", "25", "30"),
     "20",
     function() plot_reference_heatmap(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "BUB_01", ANALYTIC_FAMILY, NA_character_, "Bubble chart", "Maximum",
-    "Ең үлкен мәні бар санатты табыңыз.",
+    "Қай санаттың мәні ең жоғары?",
     c("A", "B", "C", "D", "E"),
     "D",
     function() plot_reference_bubble(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "BUB_02", ANALYTIC_FAMILY, NA_character_, "Bubble chart", "Minimum",
-    "Ең кіші мәні бар санатты табыңыз.",
+    "Қай санаттың мәні ең төмен?",
     c("A", "B", "C", "D", "E"),
     "E",
     function() plot_reference_bubble(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "BUB_03", ANALYTIC_FAMILY, NA_character_, "Bubble chart", "Compare",
-    "B мен C арасында қай санаттың мәні жоғары?",
+    "Қай санаттың мәні жоғары: B әлде C?",
     c("B", "C", "Бірдей"),
     "B",
     function() plot_reference_bubble(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "BUB_04", ANALYTIC_FAMILY, NA_character_, "Bubble chart", "Second highest",
-    "Мәні бойынша екінші санат қайсы?",
+    "Қай санаттың мәні максималды мәннен кейін екінші орында тұр?",
     c("A", "B", "C", "D", "E"),
     "B",
     function() plot_reference_bubble(show_titles = TRUE)
   ))
-
+  
   add_task(single_task(
     "BUB_05", ANALYTIC_FAMILY, NA_character_, "Bubble chart", "Difference",
-    "D санаты B санатынан неше бірлікке жоғары?",
+    "D санатының мәні B санатынан қанша бірлікке жоғары?",
     c("10", "15", "20", "25", "30"),
     "20",
     function() plot_reference_bubble(show_titles = TRUE)
   ))
-
+  
   # ---- Special Analytics Multi-panel: extra 1 ----
   add_task(multi_panel_task(
     "SPA_01", ANALYTIC_FAMILY, NA_character_, "4-panel analytics reference", "Mixed analytics comparison",
-    "Әр диаграмма үшін дұрыс жауапты таңдаңыз.",
+    "Сұрақтарға жауап бер",
     panels = list(
       list(
         panel_id = "spa_bar",
-        panel_label = "Ең үлкен мәні бар санатты табыңыз.",
+        panel_label = "Қай санаттың мәні ең жоғары?",
         panel_order = 1L,
         answer_choices = c("A", "B", "C", "D", "E"),
         correct_answer = "D",
@@ -760,30 +760,30 @@ build_task_bank <- function() {
       ),
       list(
         panel_id = "spa_treemap",
-        panel_label = "Ең кіші мәні бар санатты табыңыз.",
+        panel_label = "Қай санаттың мәні ең жоғары?",
         panel_order = 2L,
         answer_choices = c("A", "B", "C", "D", "E"),
-        correct_answer = "E",
+        correct_answer = "D",
         plot_fun = function() plot_reference_treemap(show_titles = FALSE)
       ),
       list(
         panel_id = "spa_heatmap",
-        panel_label = "B мен C арасында қай санаттың мәні жоғары?",
+        panel_label = "Қай санаттың мәні ең жоғары?",
         panel_order = 3L,
-        answer_choices = c("B", "C", "Бірдей"),
-        correct_answer = "B",
+        answer_choices = c("A", "B", "C", "D", "E"),
+        correct_answer = "D",
         plot_fun = function() plot_reference_heatmap(show_titles = FALSE)
       ),
       list(
         panel_id = "spa_bubble",
-        panel_label = "D санаты B санатынан неше бірлікке жоғары?",
+        panel_label = "Қай санаттың мәні ең жоғары?",
         panel_order = 4L,
-        answer_choices = c("10", "15", "20", "25", "30"),
-        correct_answer = "20",
+        answer_choices = c("A", "B", "C", "D", "E"),
+        correct_answer = "D",
         plot_fun = function() plot_reference_bubble(show_titles = FALSE)
       )
     )
   ))
-
+  
   tasks
 }

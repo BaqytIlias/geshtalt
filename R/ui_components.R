@@ -89,7 +89,8 @@ experiment_screen_ui <- function(task, position, total, participant_id) {
           "answer_choice",
           label = "Жауабыңыз",
           choices = task$answer_choices,
-          selected = character(0)
+          selected = character(0),
+          inline = TRUE
         ),
         shiny::sliderInput(
           "ease_rating",
@@ -203,6 +204,137 @@ completion_screen_ui <- function() {
         class = "table-card",
         shiny::tags$h2("Соңғы сақталған жазбалар"),
         DT::DTOutput("recent_results_table")
+      )
+    )
+  )
+}
+
+teacher_analysis_ui <- function() {
+  shiny::div(
+    class = "page-wrap teacher-page",
+    shiny::div(
+      class = "teacher-grid",
+      soft_card(
+        class = "teacher-upload-card",
+        shiny::tags$h1("Мұғалімге арналған талдау"),
+        shiny::tags$p(
+          class = "lead-text",
+          "Бұл бөлімде эксперимент нәтижелері бар CSV файлын жүктеп, визуализация түрлері бойынша статистикалық талдау жүргізуге болады."
+        ),
+        shiny::fileInput(
+          "teacher_csv",
+          "CSV файлын жүктеңіз",
+          accept = c(".csv")
+        ),
+        shiny::uiOutput("teacher_upload_message_ui"),
+        shiny::div(
+          class = "teacher-actions",
+          shiny::actionButton("teacher_run_analysis", "Талдауды бастау", class = "action-main"),
+          shiny::downloadButton("teacher_download_summary", "Қорытындыны CSV-ге жүктеу", class = "action-secondary"),
+          shiny::downloadButton("teacher_download_tests", "Тест нәтижесін CSV-ге жүктеу", class = "action-secondary")
+        )
+      ),
+      soft_card(
+        class = "teacher-filter-card",
+        shiny::tags$h2("Талдау параметрлері"),
+        shiny::checkboxGroupInput(
+          "teacher_vis_types",
+          "Визуализация түрлері",
+          choices = character(0)
+        ),
+        shiny::selectInput(
+          "teacher_metric",
+          "Негізгі көрсеткіш",
+          choices = analysis_metric_choices(),
+          selected = "subjective_answer"
+        ),
+        shiny::selectizeInput(
+          "teacher_task_family",
+          "Task family бойынша сүзу",
+          choices = character(0),
+          multiple = TRUE
+        ),
+        shiny::selectizeInput(
+          "teacher_block",
+          "Блок бойынша сүзу",
+          choices = character(0),
+          multiple = TRUE
+        ),
+        shiny::radioButtons(
+          "teacher_row_scope",
+          "Жол түрі",
+          choices = c(
+            "Барлығы" = "all",
+            "Тек объективті" = "objective",
+            "Тек субъективті" = "subjective"
+          ),
+          selected = "all",
+          inline = TRUE
+        ),
+        shiny::checkboxInput(
+          "teacher_robust",
+          "Параметрлік емес талдауды қолдану",
+          value = FALSE
+        ),
+        shiny::checkboxInput(
+          "teacher_check_normality",
+          "Нормалдықты тексеру",
+          value = FALSE
+        )
+      )
+    ),
+    shiny::div(
+      class = "teacher-output-grid",
+      soft_card(
+        class = "table-card",
+        shiny::tags$h2("Бағандарды тексеру"),
+        DT::DTOutput("teacher_validation_table")
+      ),
+      soft_card(
+        class = "table-card",
+        shiny::tags$h2("Жүктелген файлдың үзіндісі"),
+        DT::DTOutput("teacher_preview_table")
+      )
+    ),
+    shiny::div(
+      class = "teacher-output-grid",
+      soft_card(
+        class = "table-card",
+        shiny::tags$h2("Жалпы қорытынды"),
+        shiny::uiOutput("teacher_overview_ui"),
+        DT::DTOutput("teacher_summary_table")
+      ),
+      soft_card(
+        class = "table-card",
+        shiny::tags$h2("Статистикалық нәтиже"),
+        shiny::uiOutput("teacher_interpretation_ui"),
+        shiny::verbatimTextOutput("teacher_test_output"),
+        DT::DTOutput("teacher_group_summary_table"),
+        DT::DTOutput("teacher_normality_table"),
+        DT::DTOutput("teacher_posthoc_table")
+      )
+    ),
+    shiny::div(
+      class = "teacher-plot-grid",
+      soft_card(
+        class = "plot-card teacher-plot-card",
+        shiny::tags$h2("Субъективті бағаның boxplot-ы"),
+        shiny::plotOutput("teacher_subjective_boxplot", height = "340px")
+      ),
+      soft_card(
+        class = "plot-card teacher-plot-card",
+        shiny::tags$h2("Орташа сенім"),
+        shiny::plotOutput("teacher_confidence_barplot", height = "340px")
+      ),
+      soft_card(
+        class = "plot-card teacher-plot-card",
+        shiny::tags$h2("Дәлдік"),
+        shiny::plotOutput("teacher_accuracy_barplot", height = "340px")
+      ),
+      soft_card(
+        class = "plot-card teacher-plot-card",
+        shiny::tags$h2("Реакция уақытының boxplot-ы"),
+        shiny::plotOutput("teacher_reaction_time_boxplot", height = "340px")
       )
     )
   )

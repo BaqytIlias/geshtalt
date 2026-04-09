@@ -635,7 +635,14 @@ ui <- shiny::fluidPage(
       )
     )
   ),
-  shiny::uiOutput("app_body")
+  shiny::div(
+    class = "app-tabs",
+    shiny::tabsetPanel(
+      id = "app_mode",
+      shiny::tabPanel("Қатысушы бөлімі", shiny::uiOutput("app_body")),
+      shiny::tabPanel("Мұғалімге арналған талдау", teacher_analysis_ui())
+    )
+  )
 )
 
 # ---- Server ----
@@ -667,6 +674,54 @@ server <- function(input, output, session) {
 
   participant_id_current <- shiny::reactive({
     trimws(input$participant_id %||% "")
+  })
+
+  message_datatable <- function(message_text) {
+    DT::datatable(
+      data.frame(Хабарлама = message_text, stringsAsFactors = FALSE),
+      options = list(dom = "t", language = DT_LANGUAGE),
+      rownames = FALSE
+    )
+  }
+
+  empty_teacher_test <- function(message_text) {
+    list(
+      status = "warning",
+      raw_output = message_text,
+      interpretation = message_text,
+      group_summary = data.frame(),
+      result_table = data.frame(),
+      posthoc_table = data.frame()
+    )
+  }
+
+  teacher_analysis_result <- shiny::reactiveVal(NULL)
+
+  teacher_upload <- shiny::reactive({
+    if (is.null(input$teacher_csv)) {
+      return(list(data = NULL, error = NULL))
+    }
+    safe_read_experiment_csv(input$teacher_csv)
+  })
+
+  teacher_raw_data <- shiny::reactive({
+    teacher_upload()$data
+  })
+
+  teacher_upload_error <- shiny::reactive({
+    teacher_upload()$error
+  })
+
+  teacher_validation <- shiny::reactive({
+    validate_analysis_columns(teacher_raw_data())
+  })
+
+  teacher_analysis_data <- shiny::reactive({
+    df <- teacher_raw_data()
+    if (is.null(df) || !nrow(df)) {
+      return(data.frame())
+    }
+    normalize_analysis_dataset(df)
   })
 
   initialize_panel_progress <- function(task) {
@@ -712,6 +767,29 @@ server <- function(input, output, session) {
     }, once = TRUE)
   }
 
+  shiny::observeEvent(input$teacher_csv, {
+    teacher_analysis_result(NULL)
+  }, ignoreInit = TRUE)
+
+  shiny::observeEvent(teacher_analysis_data(), {
+    data <- teacher_analysis_data()
+
+    if (is.null(data) || !nrow(data)) {
+      shiny::updateCheckboxGroupInput(session, "teacher_vis_types", choices = character(0), selected = character(0))
+      shiny::updateSelectizeInput(session, "teacher_task_family", choices = character(0), selected = character(0), server = TRUE)
+      shiny::updateSelectizeInput(session, "teacher_block", choices = character(0), selected = character(0), server = TRUE)
+      return()
+    }
+
+    vis_choices <- nonempty_unique_values(data$vis_type)
+    task_family_choices <- nonempty_unique_values(data$task_family)
+    block_choices <- nonempty_unique_values(data$block)
+
+    shiny::updateCheckboxGroupInput(session, "teacher_vis_types", choices = vis_choices, selected = vis_choices)
+    shiny::updateSelectizeInput(session, "teacher_task_family", choices = task_family_choices, selected = character(0), server = TRUE)
+    shiny::updateSelectizeInput(session, "teacher_block", choices = block_choices, selected = character(0), server = TRUE)
+  }, ignoreInit = FALSE)
+
   output$app_body <- shiny::renderUI({
     if (identical(state$screen, "welcome")) {
       return(welcome_screen_ui())
@@ -733,6 +811,416 @@ server <- function(input, output, session) {
 
     completion_screen_ui()
   })
+
+  output$teacher_upload_message_ui <- shiny::renderUI({
+    if (is.null(input$teacher_csv)) {
+      return(
+        shiny::div(
+          class = "teacher-message is-info",
+          "Нәтижелерді талдау үшін алдымен CSV файлын жүктеңіз."
+        )
+      )
+    }
+
+    upload_error <- teacher_upload_error()
+    if (!is.null(upload_error)) {
+      return(shiny::div(class = "teacher-message is-warning", upload_error))
+    }
+
+    raw_df <- teacher_raw_data()
+    validation <- teacher_validation()
+
+    tags <- list(
+      shiny::div(
+        class = "teacher-message is-success",
+        paste("Файл сәтті жүктелді:", nrow(raw_df), "жол,", ncol(raw_df), "баған.")
+      )
+    )
+
+    if (length(validation$warnings)) {
+      tags <- c(
+        tags,
+        list(
+          shiny::div(
+            class = "teacher-message is-warning",
+            shiny::tags$ul(
+              class = "teacher-note-list",
+              lapply(validation$warnings, shiny::tags$li)
+            )
+          )
+        )
+      )
+    }
+
+    shiny::tagList(tags)
+  })
+
+  output$teacher_validation_table <- DT::renderDT({
+    if (is.null(input$teacher_csv)) {
+      return(message_datatable("Әзірге файл жүктелген жоқ."))
+    }
+
+    upload_error <- teacher_upload_error()
+    if (!is.null(upload_error)) {
+      return(message_datatable(upload_error))
+    }
+
+    validation <- teacher_validation()
+    DT::datatable(
+      validation$summary,
+      rownames = FALSE,
+      options = list(dom = "t", autoWidth = TRUE, language = DT_LANGUAGE)
+    )
+  })
+
+  output$teacher_preview_table <- DT::renderDT({
+    if (is.null(input$teacher_csv)) {
+      return(message_datatable("Файл жүктелгеннен кейін алдын ала қарау осында көрсетіледі."))
+    }
+
+    upload_error <- teacher_upload_error()
+    if (!is.null(upload_error)) {
+      return(message_datatable(upload_error))
+    }
+
+    preview_df <- utils::head(as.data.frame(teacher_raw_data(), stringsAsFactors = FALSE), 15)
+    DT::datatable(
+      preview_df,
+      rownames = FALSE,
+      options = list(pageLength = 15, autoWidth = TRUE, scrollX = TRUE, language = DT_LANGUAGE)
+    )
+  })
+
+  shiny::observeEvent(input$teacher_run_analysis, {
+    if (is.null(input$teacher_csv)) {
+      teacher_analysis_result(list(
+        error = "Алдымен CSV файлын жүктеңіз.",
+        filtered = data.frame(),
+        descriptives = generate_analysis_descriptives(data.frame()),
+        metric_info = list(data = data.frame(), metric_label = NULL, error = NULL),
+        normality = list(table = data.frame(), interpretation = NULL),
+        test_result = empty_teacher_test("Талдау әлі орындалған жоқ.")
+      ))
+      return()
+    }
+
+    upload_error <- teacher_upload_error()
+    if (!is.null(upload_error)) {
+      teacher_analysis_result(list(
+        error = upload_error,
+        filtered = data.frame(),
+        descriptives = generate_analysis_descriptives(data.frame()),
+        metric_info = list(data = data.frame(), metric_label = NULL, error = NULL),
+        normality = list(table = data.frame(), interpretation = NULL),
+        test_result = empty_teacher_test(upload_error)
+      ))
+      return()
+    }
+
+    validation <- teacher_validation()
+    normalized <- teacher_analysis_data()
+
+    if (!isTRUE(validation$vis_type_ready)) {
+      error_text <- "Визуализация түрі көрсетілмегендіктен, салыстырмалы талдау жүргізу мүмкін емес."
+      teacher_analysis_result(list(
+        error = error_text,
+        filtered = normalized,
+        descriptives = generate_analysis_descriptives(data.frame()),
+        metric_info = list(data = data.frame(), metric_label = NULL, error = NULL),
+        normality = list(table = data.frame(), interpretation = NULL),
+        test_result = empty_teacher_test(error_text)
+      ))
+      return()
+    }
+
+    available_vis <- nonempty_unique_values(normalized$vis_type)
+    selected_vis <- input$teacher_vis_types %||% character(0)
+    if (length(available_vis) > 0 && length(selected_vis) == 0) {
+      teacher_analysis_result(list(
+        error = "Кемінде бір визуализация түрін таңдаңыз.",
+        filtered = data.frame(),
+        descriptives = generate_analysis_descriptives(data.frame()),
+        metric_info = list(data = data.frame(), metric_label = NULL, error = NULL),
+        normality = list(table = data.frame(), interpretation = NULL),
+        test_result = empty_teacher_test("Кемінде бір визуализация түрі таңдалуы тиіс.")
+      ))
+      return()
+    }
+
+    filtered <- filter_analysis_dataset(
+      normalized,
+      vis_types = if (length(selected_vis)) selected_vis else NULL,
+      task_families = if (length(input$teacher_task_family %||% character(0))) input$teacher_task_family else NULL,
+      blocks = if (length(input$teacher_block %||% character(0))) input$teacher_block else NULL,
+      row_scope = input$teacher_row_scope %||% "all"
+    )
+
+    if (!nrow(filtered)) {
+      teacher_analysis_result(list(
+        error = "Сүзгіден кейін дерек қалмады.",
+        filtered = filtered,
+        descriptives = generate_analysis_descriptives(filtered),
+        metric_info = list(data = data.frame(), metric_label = NULL, error = NULL),
+        normality = list(table = data.frame(), interpretation = NULL),
+        test_result = empty_teacher_test("Статистикалық тест жүргізуге дерек жеткіліксіз.")
+      ))
+      return()
+    }
+
+    descriptives <- generate_analysis_descriptives(filtered)
+    metric_info <- prepare_analysis_metric_data(filtered, input$teacher_metric %||% "subjective_answer")
+
+    normality <- list(table = data.frame(), interpretation = NULL)
+    if (isTRUE(input$teacher_check_normality) && is.null(metric_info$error)) {
+      normality <- run_shapiro_safe(metric_info$data, metric_info$metric_label)
+    }
+
+    test_result <- if (is.null(metric_info$error)) {
+      run_analysis_test(
+        metric_info$data,
+        metric_info$metric_label,
+        robust = isTRUE(input$teacher_robust)
+      )
+    } else {
+      empty_teacher_test(metric_info$error)
+    }
+
+    teacher_analysis_result(list(
+      error = NULL,
+      filtered = filtered,
+      descriptives = descriptives,
+      metric_info = metric_info,
+      normality = normality,
+      test_result = test_result
+    ))
+  }, ignoreInit = TRUE)
+
+  output$teacher_overview_ui <- shiny::renderUI({
+    result <- teacher_analysis_result()
+    if (is.null(result)) {
+      return(shiny::div(class = "teacher-message is-info", "Файлды жүктеп, «Талдауды бастау» батырмасын басыңыз."))
+    }
+
+    if (!is.null(result$error)) {
+      return(shiny::div(class = "teacher-message is-warning", result$error))
+    }
+
+    overview <- result$descriptives$overview
+    shiny::div(
+      class = "metric-grid",
+      shiny::div(
+        class = "metric-card",
+        shiny::div(class = "metric-label", "Қатысушылар"),
+        shiny::div(class = "metric-value", overview$participants)
+      ),
+      shiny::div(
+        class = "metric-card",
+        shiny::div(class = "metric-label", "Жол саны"),
+        shiny::div(class = "metric-value", overview$rows)
+      ),
+      shiny::div(
+        class = "metric-card",
+        shiny::div(class = "metric-label", "Визуализация түрлері"),
+        shiny::div(class = "metric-value", overview$vis_types)
+      ),
+      shiny::div(
+        class = "metric-card",
+        shiny::div(class = "metric-label", "Объективті / субъективті"),
+        shiny::div(class = "metric-value", paste0(overview$objective_rows, " / ", overview$subjective_rows))
+      )
+    )
+  })
+
+  output$teacher_summary_table <- DT::renderDT({
+    result <- teacher_analysis_result()
+    if (is.null(result)) {
+      return(message_datatable("Қорытынды кесте талдау басталғаннан кейін көрсетіледі."))
+    }
+
+    if (!is.null(result$error)) {
+      return(message_datatable(result$error))
+    }
+
+    summary_df <- result$descriptives$table
+    if (!nrow(summary_df)) {
+      return(message_datatable("Қорытынды кесте үшін дерек табылмады."))
+    }
+
+    DT::datatable(
+      summary_df,
+      rownames = FALSE,
+      options = list(pageLength = 12, autoWidth = TRUE, scrollX = TRUE, language = DT_LANGUAGE)
+    )
+  })
+
+  output$teacher_interpretation_ui <- shiny::renderUI({
+    result <- teacher_analysis_result()
+    if (is.null(result)) {
+      return(NULL)
+    }
+
+    messages <- list()
+
+    if (!is.null(result$error)) {
+      messages <- c(messages, list(shiny::tags$p(result$error)))
+    }
+
+    metric_error <- result$metric_info$error %||% NULL
+    if (!is.null(metric_error)) {
+      messages <- c(messages, list(shiny::tags$p(metric_error)))
+    }
+
+    test_interpretation <- result$test_result$interpretation %||% NULL
+    if (!is.null(test_interpretation)) {
+      if (length(test_interpretation) == 1) {
+        messages <- c(messages, list(shiny::tags$p(test_interpretation)))
+      } else {
+        messages <- c(messages, lapply(test_interpretation, shiny::tags$p))
+      }
+    }
+
+    normality_interpretation <- result$normality$interpretation %||% NULL
+    if (!is.null(normality_interpretation) && nzchar(normality_interpretation)) {
+      messages <- c(messages, list(shiny::tags$p(normality_interpretation)))
+    }
+
+    if (!length(messages)) {
+      return(NULL)
+    }
+
+    shiny::div(class = "teacher-interpretation", messages)
+  })
+
+  output$teacher_test_output <- shiny::renderPrint({
+    result <- teacher_analysis_result()
+    if (is.null(result)) {
+      cat("Статистикалық тест нәтижесі әлі есептелген жоқ.")
+      return(invisible(NULL))
+    }
+
+    raw_output <- result$test_result$raw_output %||% "Статистикалық тест орындалмады."
+    if (length(raw_output) > 1) {
+      cat(paste(raw_output, collapse = "\n"))
+    } else {
+      cat(raw_output)
+    }
+  })
+
+  output$teacher_group_summary_table <- DT::renderDT({
+    result <- teacher_analysis_result()
+    if (is.null(result)) {
+      return(message_datatable("Топтық қорытынды әлі дайын емес."))
+    }
+
+    df <- result$test_result$group_summary
+    if (is.null(df) || !nrow(df)) {
+      return(message_datatable("Таңдалған көрсеткіш бойынша топтық қорытынды жасауға дерек жеткіліксіз."))
+    }
+
+    DT::datatable(
+      df,
+      rownames = FALSE,
+      options = list(dom = "t", autoWidth = TRUE, language = DT_LANGUAGE)
+    )
+  })
+
+  output$teacher_normality_table <- DT::renderDT({
+    result <- teacher_analysis_result()
+    if (is.null(result) || !isTRUE(input$teacher_check_normality)) {
+      return(message_datatable("Нормалдықты тексеру таңдалған кезде осы жерде көрсетіледі."))
+    }
+
+    df <- result$normality$table
+    if (is.null(df) || !nrow(df)) {
+      return(message_datatable("Нормалдықты тексеруге жеткілікті дерек табылмады."))
+    }
+
+    DT::datatable(
+      df,
+      rownames = FALSE,
+      options = list(dom = "t", autoWidth = TRUE, language = DT_LANGUAGE)
+    )
+  })
+
+  output$teacher_posthoc_table <- DT::renderDT({
+    result <- teacher_analysis_result()
+    if (is.null(result)) {
+      return(message_datatable("Post-hoc нәтижесі талдау аяқталғаннан кейін көрсетіледі."))
+    }
+
+    df <- result$test_result$posthoc_table
+    if (is.null(df) || !nrow(df)) {
+      return(message_datatable("Бұл талдау үшін post-hoc кестесі жоқ."))
+    }
+
+    DT::datatable(
+      df,
+      rownames = FALSE,
+      options = list(pageLength = 10, autoWidth = TRUE, scrollX = TRUE, language = DT_LANGUAGE)
+    )
+  })
+
+  output$teacher_subjective_boxplot <- shiny::renderPlot({
+    result <- teacher_analysis_result()
+    if (is.null(result) || is.null(result$filtered) || !nrow(result$filtered)) {
+      return(analysis_empty_plot("Талдауды бастағаннан кейін график осында шығады."))
+    }
+    plot_subjective_score_boxplot(result$filtered)
+  }, res = 110)
+
+  output$teacher_confidence_barplot <- shiny::renderPlot({
+    result <- teacher_analysis_result()
+    if (is.null(result) || is.null(result$filtered) || !nrow(result$filtered)) {
+      return(analysis_empty_plot("Талдауды бастағаннан кейін график осында шығады."))
+    }
+    plot_confidence_mean_bar(result$filtered)
+  }, res = 110)
+
+  output$teacher_accuracy_barplot <- shiny::renderPlot({
+    result <- teacher_analysis_result()
+    if (is.null(result) || is.null(result$filtered) || !nrow(result$filtered)) {
+      return(analysis_empty_plot("Талдауды бастағаннан кейін график осында шығады."))
+    }
+    plot_accuracy_bar(result$filtered)
+  }, res = 110)
+
+  output$teacher_reaction_time_boxplot <- shiny::renderPlot({
+    result <- teacher_analysis_result()
+    if (is.null(result) || is.null(result$filtered) || !nrow(result$filtered)) {
+      return(analysis_empty_plot("Талдауды бастағаннан кейін график осында шығады."))
+    }
+    plot_reaction_time_boxplot(result$filtered)
+  }, res = 110)
+
+  output$teacher_download_summary <- shiny::downloadHandler(
+    filename = function() {
+      paste0("analysis_summary_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      result <- teacher_analysis_result()
+      summary_df <- if (is.null(result) || is.null(result$descriptives$table) || !nrow(result$descriptives$table)) {
+        data.frame(note = "Қорытынды статистика әзірге есептелген жоқ.", stringsAsFactors = FALSE)
+      } else {
+        result$descriptives$table
+      }
+      readr::write_csv(summary_df, file, na = "")
+    }
+  )
+
+  output$teacher_download_tests <- shiny::downloadHandler(
+    filename = function() {
+      paste0("analysis_test_results_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      result <- teacher_analysis_result()
+      export_df <- if (is.null(result)) {
+        data.frame(section = "message", note = "Статистикалық тест нәтижесі әзірге жоқ.", stringsAsFactors = FALSE)
+      } else {
+        build_analysis_test_export(result$test_result, result$normality)
+      }
+      readr::write_csv(export_df, file, na = "")
+    }
+  )
 
   output$task_visual_ui <- shiny::renderUI({
     shiny::req(identical(state$screen, "experiment"))
@@ -884,13 +1372,13 @@ server <- function(input, output, session) {
 
   output$download_buttons_ui <- shiny::renderUI({
     buttons <- list(
-      shiny::downloadButton("download_my_results", "Менің нәтижелерімді Excel-ге жүктеу", class = "action-main")
+      shiny::downloadButton("download_my_results", "Менің нәтижелерімді CSV-ге жүктеу", class = "action-main")
     )
 
     if (file.exists(RESULTS_FILE)) {
       buttons <- c(
         buttons,
-        list(shiny::downloadButton("download_all_results", "Барлық нәтижелерді Excel-ге жүктеу", class = "action-secondary"))
+        list(shiny::downloadButton("download_all_results", "Барлық нәтижелерді CSV-ге жүктеу", class = "action-secondary"))
       )
     }
 
@@ -968,19 +1456,19 @@ server <- function(input, output, session) {
 
   output$download_my_results <- shiny::downloadHandler(
     filename = function() {
-      paste0("participant_results_", trimws(input$participant_id %||% "participant"), "_", Sys.Date(), ".xlsx")
+      paste0("participant_results_", trimws(input$participant_id %||% "participant"), "_", Sys.Date(), ".csv")
     },
     content = function(file) {
-      write_simple_xlsx(list("Менің нәтижелерім" = normalize_results_table(state$session_results)), file)
+      readr::write_csv(normalize_results_table(state$session_results), file, na = "")
     }
   )
 
   output$download_all_results <- shiny::downloadHandler(
     filename = function() {
-      paste0("experiment_results_", Sys.Date(), ".xlsx")
+      paste0("experiment_results_", Sys.Date(), ".csv")
     },
     content = function(file) {
-      write_simple_xlsx(list("Барлық нәтижелер" = read_results_file(RESULTS_FILE)), file)
+      readr::write_csv(read_results_file(RESULTS_FILE), file, na = "")
     }
   )
 

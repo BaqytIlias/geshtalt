@@ -1,0 +1,12 @@
+name: diplom_project
+title: diplom_project
+username: dimplomka
+account: dimplomka
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 17070814
+bundleId: 11820591
+url: https://dimplomka.shinyapps.io/diplom_project/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

@@ -33,6 +33,30 @@ body {
   gap: 24px;
 }
 
+.app-tabs .nav-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 24px;
+  border-bottom: none;
+}
+
+.app-tabs .nav-tabs > li > a {
+  border: 1px solid rgba(22, 50, 79, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ink);
+  font-weight: 700;
+  padding: 12px 18px;
+}
+
+.app-tabs .nav-tabs > li.active > a,
+.app-tabs .nav-tabs > li.active > a:focus,
+.app-tabs .nav-tabs > li.active > a:hover {
+  background: var(--accent);
+  color: #FFFFFF;
+  border-color: var(--accent);
+}
+
 .hero-grid,
 .experiment-grid,
 .completion-grid {
@@ -49,6 +73,22 @@ body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.teacher-grid,
+.teacher-output-grid,
+.teacher-plot-grid {
+  display: grid;
+  gap: 24px;
+}
+
+.teacher-grid {
+  grid-template-columns: minmax(320px, 0.92fr) minmax(320px, 1.08fr);
+}
+
+.teacher-output-grid,
+.teacher-plot-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .soft-card {
   background: var(--surface);
   border: 1px solid rgba(22, 50, 79, 0.08);
@@ -58,7 +98,8 @@ body {
 }
 
 .hero-card h1,
-.completion-card h1 {
+.completion-card h1,
+.teacher-upload-card h1 {
   margin-top: 0;
   margin-bottom: 10px;
   font-weight: 800;
@@ -68,7 +109,9 @@ body {
 .form-card h2,
 .question-card h2,
 .table-card h2,
-.multi-task-card h2 {
+.multi-task-card h2,
+.teacher-plot-card h2,
+.teacher-filter-card h2 {
   margin-top: 0;
   color: #16324F;
 }
@@ -82,6 +125,12 @@ body {
 
 .hero-highlights,
 .download-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.teacher-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -109,6 +158,49 @@ body {
   color: #5A7184;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.teacher-message {
+  font-size: 13px;
+  line-height: 1.6;
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.teacher-message.is-info {
+  background: #F3F8FB;
+  border: 1px solid #DDE8EF;
+  color: #4F6D7A;
+}
+
+.teacher-message.is-success {
+  background: #F2FBF4;
+  border: 1px solid #D6EED9;
+  color: #2E6B35;
+}
+
+.teacher-message.is-warning {
+  background: #FFF8ED;
+  border: 1px solid #F0D9AE;
+  color: #8B5E1C;
+}
+
+.teacher-interpretation {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.teacher-interpretation p {
+  margin: 0;
+}
+
+.teacher-note-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #4F6D7A;
+  line-height: 1.7;
 }
 
 .top-strip {
@@ -419,6 +511,9 @@ body {
   .hero-grid,
   .experiment-grid,
   .completion-grid,
+  .teacher-grid,
+  .teacher-output-grid,
+  .teacher-plot-grid,
   .metric-grid,
   .multi-slider-grid,
   .multi-panel-grid {
